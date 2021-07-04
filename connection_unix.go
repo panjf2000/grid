@@ -236,6 +236,23 @@ func (c *conn) Wake() error {
 	})
 }
 
+func (c *conn) AsyncExecute(cb func(Conn) ([]byte, Action)) error {
+	return c.loop.poller.Trigger(func() error {
+		if !c.opened {
+			return nil
+		}
+
+		buf, action := cb(c)
+		if len(buf) != 0 {
+			if err := c.write(buf); err != nil {
+				return err
+			}
+		}
+
+		return c.loop.handleAction(c, action)
+	})
+}
+
 func (c *conn) Close() error {
 	return c.loop.poller.Trigger(func() error {
 		return c.loop.loopCloseConn(c, nil)

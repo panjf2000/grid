@@ -209,17 +209,22 @@ func (c *stdConn) BufferLength() int {
 	return c.inboundBuffer.Length() + c.buffer.Len()
 }
 
-func (c *stdConn) AsyncWrite(buf []byte) (err error) {
-	var encodedBuf []byte
-	if encodedBuf, err = c.codec.Encode(c, buf); err == nil {
-		c.loop.ch <- func() (err error) {
-			if c.conn != nil {
-				_, err = c.conn.Write(encodedBuf)
-			}
-			return
+func (c *stdConn) AsyncWrite(buf []byte) error {
+	c.loop.ch <- func() error {
+		if c.conn == nil {
+			return nil
 		}
+
+		encodedBuf, err := c.codec.Encode(c, buf)
+		if err != nil {
+			return err
+		}
+
+		_, err = c.conn.Write(encodedBuf)
+		return err
 	}
-	return
+
+	return nil
 }
 
 func (c *stdConn) SendTo(buf []byte) (err error) {
@@ -229,6 +234,31 @@ func (c *stdConn) SendTo(buf []byte) (err error) {
 
 func (c *stdConn) Wake() error {
 	c.loop.ch <- wakeReq{c}
+	return nil
+}
+
+func (c *stdConn) AsyncExecute(cb func(conn Conn) ([]byte, Action)) error {
+	c.loop.ch <- func() error {
+		if c.conn == nil {
+			return nil
+		}
+
+		buf, action := cb(c)
+
+		if len(buf) != 0 {
+			encodedBuf, err := c.codec.Encode(c, buf)
+			if err != nil {
+				return err
+			}
+
+			if _, err = c.conn.Write(encodedBuf); err != nil {
+				return err
+			}
+		}
+
+		return c.loop.handleAction(c, action)
+	}
+
 	return nil
 }
 
